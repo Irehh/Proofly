@@ -1,0 +1,31 @@
+:root {
+  /* Paystack-inspired clarity: Deep Navy + Confident Green + Soft Canvas */
+  --proofly-navy: #0b1f3a;
+  --proofly-navy-soft: #132c4e;
+  --proofly-green: #09a55a;
+  --proofly-green-hover: #078c4c;
+  --proofly-canvas: #f7f9fc;
+  --proofly-surface: #ffffff;
+  --proofly-border: #e2e8f0;
+  --proofly-text: #0b1f3a;
+  --proofly-text-muted: #526277;
+
+  --font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: var(--proofly-canvas);
+  color: var(--proofly-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

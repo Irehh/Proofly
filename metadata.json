@@ -1,0 +1,6 @@
+{
+  "name": "Proofly",
+  "description": "Multi-tenant geofenced staff attendance SaaS with database-per-tenant isolation, double-entry billing, and offline-first PWA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

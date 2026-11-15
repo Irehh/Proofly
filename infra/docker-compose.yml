@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: proofly-postgres
+    environment:
+      POSTGRES_USER: proofly_admin
+      POSTGRES_PASSWORD: proofly_local_dev_password
+      POSTGRES_DB: proofly_control
+    ports:
+      - "5432:5432"
+    volumes:
+      - proofly_pg_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proofly_admin -d proofly_control"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "log_statement=ddl"
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.23.1-p0
+    container_name: proofly-pgbouncer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_USER: proofly_admin
+      DB_PASSWORD: proofly_local_dev_password
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "500"
+      DEFAULT_POOL_SIZE: "25"
+      RESERVE_POOL_SIZE: "10"
+      SERVER_RESET_QUERY: "DISCARD ALL"
+      AUTH_TYPE: scram-sha-256
+    ports:
+      - "6432:5432"
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: proofly-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - proofly_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: proofly-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  proofly_pg_data:
+  proofly_redis_data:

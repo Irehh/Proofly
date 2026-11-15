@@ -1,0 +1,460 @@
+openapi: 3.1.0
+info:
+  title: Proofly Geofenced Attendance API
+  version: 1.0.0-p0
+  description: >
+    Multi-tenant geofenced staff attendance SaaS API. Contract-first OpenAPI 3.1 specification.
+  contact:
+    name: Proofly Engineering
+    email: engineering@proofly.com
+servers:
+  - url: http://localhost:8080
+    description: Local Spring Boot API
+paths:
+  /api/v1/auth/signup-org:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Create organization, provision tenant database, and sign in owner
+      operationId: signupOrg
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupOrgRequest'
+      responses:
+        '201':
+          description: Organization provisioned and owner authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '409':
+          description: Slug, email, or phone already exists
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: Validation error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Sign in with email/password or phone/PIN
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '423':
+          description: PIN locked due to repeated failures
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '429':
+          description: Rate limited
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Rotate refresh token (cookie for web or bearer body for mobile)
+      operationId: refreshToken
+      parameters:
+        - name: X-Client-Type
+          in: header
+          required: false
+          schema:
+            $ref: '#/components/schemas/ClientType'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Session rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Refresh token expired, revoked, or reused
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Revoke refresh token family and denylist active access token
+      operationId: logout
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '204':
+          description: Signed out
+  /api/v1/devices:
+    get:
+      tags:
+        - Authentication & Devices
+      summary: List registered devices for the authenticated user
+      operationId: listDevices
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Registered devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceView'
+        '401':
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/devices/{deviceId}:
+    delete:
+      tags:
+        - Authentication & Devices
+      summary: Revoke a registered device and invalidate all its refresh token families
+      operationId: revokeDevice
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Device revoked
+        '404':
+          description: Device not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/mfa/setup:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Initiate TOTP MFA enrollment for ADMIN or SUPER_ADMIN
+      operationId: setupMfa
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: TOTP secret and otpauth URI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaSetupResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/mfa/enable:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Verify TOTP code and enable MFA
+      operationId: enableMfa
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaEnableRequest'
+      responses:
+        '204':
+          description: MFA enabled
+        '401':
+          description: Invalid TOTP code
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/tenants/me:
+    get:
+      tags:
+        - Tenants
+      summary: Get current authenticated tenant profile
+      operationId: currentTenant
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Current tenant profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantSummary'
+        '401':
+          description: Unauthorized or missing tenant context
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+components:
+  securitySchemes:
+    bearerJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ClientType:
+      type: string
+      enum: [WEB, MOBILE, API]
+    LoginMethod:
+      type: string
+      enum: [EMAIL_PASSWORD, PHONE_PIN]
+    Role:
+      type: string
+      enum: [SUPER_ADMIN, ADMIN, MANAGER, EMPLOYEE]
+    SignupOrgRequest:
+      type: object
+      required: [orgName, slug, fullName, email, password]
+      properties:
+        orgName:
+          type: string
+          minLength: 2
+          maxLength: 160
+        slug:
+          type: string
+          pattern: '^[a-z0-9-]{3,50}$'
+        defaultTimezone:
+          type: string
+          default: Africa/Lagos
+        fullName:
+          type: string
+          minLength: 2
+          maxLength: 160
+        email:
+          type: string
+          format: email
+        phoneE164:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+        password:
+          type: string
+          minLength: 10
+          maxLength: 128
+        deviceFingerprint:
+          type: string
+        deviceName:
+          type: string
+        clientType:
+          $ref: '#/components/schemas/ClientType'
+    LoginRequest:
+      type: object
+      properties:
+        method:
+          $ref: '#/components/schemas/LoginMethod'
+        email:
+          type: string
+          format: email
+        phoneE164:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+        password:
+          type: string
+        pin:
+          type: string
+          pattern: '^\d{4,8}$'
+        totpCode:
+          type: string
+          pattern: '^\d{6}$'
+        deviceFingerprint:
+          type: string
+        deviceName:
+          type: string
+        clientType:
+          $ref: '#/components/schemas/ClientType'
+    RefreshRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+    LogoutRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+    MfaSetupResponse:
+      type: object
+      required: [base32Secret, otpauthUri]
+      properties:
+        base32Secret:
+          type: string
+        otpauthUri:
+          type: string
+    MfaEnableRequest:
+      type: object
+      required: [totpCode]
+      properties:
+        totpCode:
+          type: string
+          pattern: '^\d{6}$'
+    AuthUserView:
+      type: object
+      required: [userId, tenantId, membershipId, fullName, role, mfaEnabled]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        membershipId:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+        email:
+          type: string
+        phoneE164:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        mfaEnabled:
+          type: boolean
+    AuthResponse:
+      type: object
+      required: [accessToken, expiresInSeconds, tokenType, refreshExpiresAt, deviceId, user]
+      properties:
+        accessToken:
+          type: string
+        expiresInSeconds:
+          type: integer
+          format: int64
+        tokenType:
+          type: string
+        refreshToken:
+          type: string
+          nullable: true
+        refreshExpiresAt:
+          type: string
+          format: date-time
+        deviceId:
+          type: string
+          format: uuid
+        user:
+          $ref: '#/components/schemas/AuthUserView'
+    DeviceView:
+      type: object
+      required: [id, deviceName, platform, lastSeenAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        deviceName:
+          type: string
+        platform:
+          type: string
+          enum: [WEB_PWA, IOS, ANDROID, API]
+        lastSeenAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    TenantSummary:
+      type: object
+      required: [id, slug, name, status, schemaVersion, currentPlanId, defaultCurrency, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, PROVISIONING, ACTIVE, SUSPENDED, DELETING]
+        dbHost:
+          type: string
+        dbPort:
+          type: integer
+        dbName:
+          type: string
+        schemaVersion:
+          type: string
+        currentPlanId:
+          type: string
+          format: uuid
+        defaultCurrency:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ProblemDetail:
+      type: object
+      required: [type, title, status, detail, errorCode, correlationId, timestamp]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        errorCode:
+          type: string
+        correlationId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        fields:
+          type: object
+          additionalProperties:
+            type: string
