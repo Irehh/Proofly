@@ -71,4 +71,18 @@ public class DataSourceConfig {
         routing.afterPropertiesSet();
         return routing;
     }
+
+    @Bean(name = "controlPlaneTransactionManager")
+    public org.springframework.transaction.PlatformTransactionManager controlPlaneTransactionManager(
+            @Qualifier("controlPlaneDataSource") DataSource controlPlaneDataSource
+    ) {
+        return new org.springframework.jdbc.support.JdbcTransactionManager(controlPlaneDataSource);
+    }
+
+    @Bean(name = "controlPlaneTransactionTemplate")
+    public org.springframework.transaction.support.TransactionTemplate controlPlaneTransactionTemplate(
+            @Qualifier("controlPlaneTransactionManager") org.springframework.transaction.PlatformTransactionManager txManager
+    ) {
+        return new org.springframework.transaction.support.TransactionTemplate(txManager);
+    }
 }

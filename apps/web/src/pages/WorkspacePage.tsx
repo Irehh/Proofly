@@ -1,18 +1,26 @@
-import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { Alert, Button, Card, Input, Label } from '@proofly/ui';
-import { normalizeProblemDetail, type MfaSetupResponse, type ProblemDetail } from '@proofly/api-client';
+import React, { useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { Button } from '@proofly/ui';
+import { normalizeProblemDetail } from '@proofly/api-client';
 import { useAuth } from '../lib/authStore';
-import { mfaEnableSchema, type MfaEnableFormValues } from '../lib/validation';
+import { PWAInstallButton } from '../pwa/PWAInstallButton';
+import {
+  getMobileBottomTabs,
+  getVisibleWorkspaceTabs,
+  hasRoleAtLeast,
+  resolveSafeWorkspaceTab,
+  type WorkspaceTabId,
+} from '../lib/roleHelpers';
+import { MyShiftPanel } from '../components/workspace/MyShiftPanel';
+import { TeamOperationsPanel } from '../components/workspace/TeamOperationsPanel';
+import { SitesAndStaffPanel } from '../components/workspace/SitesAndStaffPanel';
+import { BillingAndGovernancePanel } from '../components/workspace/BillingAndGovernancePanel';
+import { OverviewSecurityPanel } from '../components/workspace/OverviewSecurityPanel';
 
 export const WorkspacePage: React.FC = () => {
-  const { user, deviceId, apiClient, logout } = useAuth();
-  const queryClient = useQueryClient();
-  const [mfaSetup, setMfaSetup] = useState<MfaSetupResponse | null>(null);
-  const [actionProblem, setActionProblem] = useState<ProblemDetail | null>(null);
-  const [mfaSuccess, setMfaSuccess] = useState(false);
+  const { user, apiClient, logout } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const tenantQuery = useQuery({
     queryKey: ['tenant', 'me'],
@@ -21,239 +29,222 @@ export const WorkspacePage: React.FC = () => {
       if (error || !data) throw normalizeProblemDetail(error);
       return data;
     },
+    enabled: !!user,
   });
 
-  const devicesQuery = useQuery({
-    queryKey: ['devices'],
-    queryFn: async () => {
-      const { data, error } = await apiClient.GET('/api/v1/devices');
-      if (error || !data) throw normalizeProblemDetail(error);
-      return data;
-    },
-  });
+  const visibleTabs = useMemo(
+    () => (user ? getVisibleWorkspaceTabs(user.role) : []),
+    [user]
+  );
 
-  const revokeMutation = useMutation({
-    mutationFn: async (targetDeviceId: string) => {
-      const { error } = await apiClient.DELETE('/api/v1/devices/{deviceId}', {
-        params: { path: { deviceId: targetDeviceId } },
-      });
-      if (error) throw normalizeProblemDetail(error);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['devices'] });
-    },
-    onError: (err) => setActionProblem(normalizeProblemDetail(err)),
-  });
+  const mobileBottomTabs = useMemo(
+    () => (user ? getMobileBottomTabs(user.role) : []),
+    [user]
+  );
 
-  const mfaForm = useForm<MfaEnableFormValues>({
-    resolver: zodResolver(mfaEnableSchema),
-    defaultValues: { totpCode: '' },
-  });
+  const activeTab: WorkspaceTabId = user
+    ? resolveSafeWorkspaceTab(searchParams.get('tab'), user.role)
+    : 'shift';
 
-  const startMfaSetup = async () => {
-    setActionProblem(null);
-    const { data, error } = await apiClient.POST('/api/v1/auth/mfa/setup');
-    if (error || !data) {
-      setActionProblem(normalizeProblemDetail(error));
-      return;
-    }
-    setMfaSetup(data);
+  const switchTab = (tab: WorkspaceTabId) => {
+    setSearchParams(tab === 'shift' ? {} : { tab });
   };
-
-  const submitMfaEnable = mfaForm.handleSubmit(async (values) => {
-    setActionProblem(null);
-    const { error } = await apiClient.POST('/api/v1/auth/mfa/enable', {
-      body: { totpCode: values.totpCode },
-    });
-    if (error) {
-      setActionProblem(normalizeProblemDetail(error));
-      return;
-    }
-    setMfaSuccess(true);
-    setMfaSetup(null);
-  });
 
   if (!user) return null;
 
-  const isAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  const groupedTabs = {
+    PERSONAL: visibleTabs.filter((t) => t.group === 'PERSONAL'),
+    OPERATIONS: visibleTabs.filter((t) => t.group === 'OPERATIONS'),
+    ADMINISTRATION: visibleTabs.filter((t) => t.group === 'ADMINISTRATION'),
+  };
+
+  const activeTabMeta = visibleTabs.find((t) => t.id === activeTab) ?? visibleTabs[0];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-6">
+    <div className="mx-auto max-w-7xl px-4 py-4 pb-20 sm:px-6 lg:py-8 lg:pb-10">
+      {/* Workspace Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3.5 sm:pb-5">
         <div>
-          <h1 className="font-display text-2xl font-bold text-[#0B1F3A]">
-            {tenantQuery.data?.name ?? 'Workspace Security & Tenancy'}
+          <h1 className="font-display text-xl font-bold text-[#0B1F3A] sm:text-2xl">
+            {tenantQuery.data?.name ?? 'Proofly Workspace'}
           </h1>
-          <p className="mt-1 text-sm text-[#526277]">
+          <p className="mt-0.5 text-xs text-[#526277] sm:mt-1 sm:text-sm">
             {user.fullName} · {user.role} · {user.email ?? user.phoneE164}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={logout}>
-          Sign out
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <PWAInstallButton />
+          <Button variant="outline" size="sm" onClick={logout}>
+            Sign out
+          </Button>
+        </div>
       </div>
 
-      {actionProblem && (
-        <Alert
-          tone="error"
-          title={actionProblem.title}
-          description={actionProblem.detail}
-          meta={`${actionProblem.errorCode} · corrId ${actionProblem.correlationId}`}
-        />
+      {/* Mobile Section Selector for additional Admin/Manager sections */}
+      {visibleTabs.length > mobileBottomTabs.length && (
+        <div className="mt-3 lg:hidden">
+          <label htmlFor="mobile-workspace-section" className="sr-only">
+            Switch workspace section
+          </label>
+          <select
+            id="mobile-workspace-section"
+            value={activeTab}
+            onChange={(e) => switchTab(e.target.value as WorkspaceTabId)}
+            className="w-full min-h-[44px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-[#0B1F3A]"
+          >
+            {visibleTabs.map((tab) => (
+              <option key={tab.id} value={tab.id}>
+                {tab.label}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
 
-      {mfaSuccess && (
-        <Alert
-          tone="success"
-          title="Two-factor authentication enabled"
-          description="Your TOTP secret is encrypted at rest and will be required on future sign-ins."
-        />
-      )}
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        <Card className="p-6 lg:col-span-5">
-          <h2 className="font-display text-base font-bold text-[#0B1F3A]">Tenant Isolation Profile</h2>
-          {tenantQuery.isLoading && <p className="mt-3 text-sm text-[#526277]">Loading tenant profile...</p>}
-          {tenantQuery.error && (
-            <div className="mt-3">
-              <Alert tone="error" title="Failed to load tenant" description={normalizeProblemDetail(tenantQuery.error).detail} />
-            </div>
-          )}
-          {tenantQuery.data && (
-            <dl className="mt-4 divide-y divide-slate-100 text-sm">
-              <div className="flex justify-between py-2.5">
-                <dt className="text-[#526277]">Workspace slug</dt>
-                <dd className="font-mono font-medium text-[#0B1F3A]">{tenantQuery.data.slug}</dd>
-              </div>
-              <div className="flex justify-between py-2.5">
-                <dt className="text-[#526277]">Status</dt>
-                <dd className="font-medium text-[#09A55A]">{tenantQuery.data.status}</dd>
-              </div>
-              <div className="flex justify-between py-2.5">
-                <dt className="text-[#526277]">Schema version</dt>
-                <dd className="font-mono tabular-nums text-[#0B1F3A]">v{tenantQuery.data.schemaVersion}</dd>
-              </div>
-              <div className="flex justify-between py-2.5">
-                <dt className="text-[#526277]">Primary currency</dt>
-                <dd className="font-mono text-[#0B1F3A]">{tenantQuery.data.defaultCurrency}</dd>
-              </div>
-            </dl>
-          )}
-        </Card>
-
-        <Card className="p-6 lg:col-span-7">
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="font-display text-base font-bold text-[#0B1F3A]">Registered Devices</h2>
-            <span className="text-xs text-[#526277] tabular-nums">
-              {devicesQuery.data?.length ?? 0} total
-            </span>
-          </div>
-
-          {devicesQuery.isLoading && <p className="mt-4 text-sm text-[#526277]">Loading devices...</p>}
-          {devicesQuery.data && devicesQuery.data.length === 0 && (
-            <p className="mt-4 text-sm text-[#526277]">No registered devices found.</p>
-          )}
-          {devicesQuery.data && devicesQuery.data.length > 0 && (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-xs text-[#526277]">
-                    <th className="py-2 pr-4 font-semibold">Device</th>
-                    <th className="py-2 pr-4 font-semibold">Platform</th>
-                    <th className="py-2 pr-4 font-semibold">Last seen</th>
-                    <th className="py-2 text-right font-semibold">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {devicesQuery.data.map((dev) => {
-                    const isCurrent = dev.id === deviceId;
-                    const isRevoked = !!dev.revokedAt;
-                    return (
-                      <tr key={dev.id}>
-                        <td className="py-3 pr-4">
-                          <span className="font-medium text-[#0B1F3A]">
-                            {dev.deviceName.slice(0, 32)}
-                          </span>
-                          {isCurrent && <span className="ml-2 text-xs text-[#09A55A]">Current</span>}
-                        </td>
-                        <td className="py-3 pr-4 font-mono text-xs text-[#526277]">{dev.platform}</td>
-                        <td className="py-3 pr-4 font-mono text-xs tabular-nums text-[#526277]">
-                          {new Date(dev.lastSeenAt).toLocaleString()}
-                        </td>
-                        <td className="py-3 text-right">
-                          {isRevoked ? (
-                            <span className="text-xs text-slate-400">Revoked</span>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => revokeMutation.mutate(dev.id)}
-                              disabled={revokeMutation.isPending}
-                            >
-                              Revoke
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {isAdmin && (
-        <Card className="p-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="mt-4 flex flex-col gap-5 lg:mt-6 lg:flex-row lg:items-start lg:gap-6">
+        {/* Desktop Sidebar (256px) */}
+        <aside className="hidden lg:block lg:w-64 shrink-0">
+          <nav aria-label="Workspace sections" className="rounded-xl border border-slate-200 bg-white p-3 space-y-5">
             <div>
-              <h2 className="font-display text-base font-bold text-[#0B1F3A]">
-                Administrator MFA (TOTP)
-              </h2>
-              <p className="mt-1 text-sm text-[#526277]">
-                Protect SUPER_ADMIN and ADMIN operations with an authenticator app.
+              <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#526277]">
+                Personal
               </p>
+              <ul className="space-y-1">
+                {groupedTabs.PERSONAL.map((tab) => (
+                  <li key={tab.id}>
+                    <button
+                      type="button"
+                      onClick={() => switchTab(tab.id)}
+                      aria-current={activeTab === tab.id ? 'page' : undefined}
+                      className={`w-full min-h-[40px] rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer ${
+                        activeTab === tab.id
+                          ? 'bg-[#0B1F3A] text-white'
+                          : 'text-[#526277] hover:bg-[#F7F9FC] hover:text-[#0B1F3A]'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
-            {!user.mfaEnabled && !mfaSetup && (
-              <Button variant="secondary" size="sm" onClick={startMfaSetup}>
-                Configure TOTP
-              </Button>
-            )}
-          </div>
 
-          {mfaSetup && (
-            <form onSubmit={submitMfaEnable} className="mt-5 max-w-md space-y-4 border-t border-slate-200 pt-5">
+            {groupedTabs.OPERATIONS.length > 0 && (
               <div>
-                <Label htmlFor="mfa-secret-display">Base32 Secret Key</Label>
-                <input
-                  id="mfa-secret-display"
-                  readOnly
-                  value={mfaSetup.base32Secret}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-[#0B1F3A]"
-                />
+                <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#526277]">
+                  Team Operations
+                </p>
+                <ul className="space-y-1">
+                  {groupedTabs.OPERATIONS.map((tab) => (
+                    <li key={tab.id}>
+                      <button
+                        type="button"
+                        onClick={() => switchTab(tab.id)}
+                        aria-current={activeTab === tab.id ? 'page' : undefined}
+                        className={`w-full min-h-[40px] rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer ${
+                          activeTab === tab.id
+                            ? 'bg-[#0B1F3A] text-white'
+                            : 'text-[#526277] hover:bg-[#F7F9FC] hover:text-[#0B1F3A]'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
+            )}
+
+            {groupedTabs.ADMINISTRATION.length > 0 && (
               <div>
-                <Label htmlFor="mfa-totp-code">Enter 6-digit verification code</Label>
-                <Input
-                  id="mfa-totp-code"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="123456"
-                  className="font-mono tabular-nums"
-                  {...mfaForm.register('totpCode')}
-                />
-                {mfaForm.formState.errors.totpCode && (
-                  <p className="mt-1 text-xs text-red-700">{mfaForm.formState.errors.totpCode.message}</p>
-                )}
+                <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#526277]">
+                  Administration
+                </p>
+                <ul className="space-y-1">
+                  {groupedTabs.ADMINISTRATION.map((tab) => (
+                    <li key={tab.id}>
+                      <button
+                        type="button"
+                        onClick={() => switchTab(tab.id)}
+                        aria-current={activeTab === tab.id ? 'page' : undefined}
+                        className={`w-full min-h-[40px] rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer ${
+                          activeTab === tab.id
+                            ? 'bg-[#0B1F3A] text-white'
+                            : 'text-[#526277] hover:bg-[#F7F9FC] hover:text-[#0B1F3A]'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <Button type="submit" variant="primary" size="sm">
-                Verify &amp; Enable MFA
-              </Button>
-            </form>
+            )}
+          </nav>
+        </aside>
+
+        {/* Active Role Panel */}
+        <section className="flex-1 min-w-0 space-y-4" aria-label={activeTabMeta?.label ?? 'Workspace panel'}>
+          {activeTab === 'shift' && <MyShiftPanel />}
+
+          {activeTab === 'team' && hasRoleAtLeast(user.role, 'MANAGER') && (
+            <TeamOperationsPanel section="team" />
           )}
-        </Card>
-      )}
+
+          {activeTab === 'reviews' && hasRoleAtLeast(user.role, 'MANAGER') && (
+            <TeamOperationsPanel section="reviews" />
+          )}
+
+          {activeTab === 'payroll' && hasRoleAtLeast(user.role, 'MANAGER') && (
+            <TeamOperationsPanel section="payroll" />
+          )}
+
+          {activeTab === 'sites' && hasRoleAtLeast(user.role, 'ADMIN') && (
+            <SitesAndStaffPanel section="sites" />
+          )}
+
+          {activeTab === 'staff' && hasRoleAtLeast(user.role, 'ADMIN') && (
+            <SitesAndStaffPanel section="staff" />
+          )}
+
+          {activeTab === 'billing' && hasRoleAtLeast(user.role, 'ADMIN') && (
+            <BillingAndGovernancePanel section="billing" />
+          )}
+
+          {activeTab === 'outbox' && hasRoleAtLeast(user.role, 'ADMIN') && (
+            <BillingAndGovernancePanel section="outbox" />
+          )}
+
+          {activeTab === 'audit' && hasRoleAtLeast(user.role, 'ADMIN') && (
+            <BillingAndGovernancePanel section="audit" />
+          )}
+
+          {activeTab === 'overview' && <OverviewSecurityPanel />}
+        </section>
+      </div>
+
+      {/* Compact Mobile Sticky Thumb Navigation (56px <= 15% viewport height) */}
+      <nav
+        aria-label="Mobile workspace navigation"
+        className="fixed bottom-0 inset-x-0 z-30 flex h-14 items-center justify-around border-t border-slate-200 bg-white px-2 lg:hidden"
+      >
+        {mobileBottomTabs.map((tab) => {
+          const isCurrent = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => switchTab(tab.id)}
+              aria-current={isCurrent ? 'page' : undefined}
+              className={`min-h-[44px] flex-1 rounded-lg px-2 py-1 text-center text-xs font-semibold transition-colors cursor-pointer ${
+                isCurrent ? 'text-[#09A55A]' : 'text-[#526277]'
+              }`}
+            >
+              {tab.mobileLabel}
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 };

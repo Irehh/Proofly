@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Alert, Button, Card, Input, Label } from '@proofly/ui';
@@ -19,6 +19,11 @@ const TIMEZONES = [
 export const SignupOrgPage: React.FC = () => {
   const { signupOrg } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const selectedPlan = searchParams.get('plan')?.toUpperCase() ?? 'FREE';
+  const selectedCycle = searchParams.get('cycle')?.toUpperCase() === 'ANNUAL' ? 'ANNUAL' : 'MONTHLY';
+  const selectedCurrency = searchParams.get('currency')?.toUpperCase() ?? 'NGN';
+
   const [problem, setProblem] = useState<ProblemDetail | null>(null);
   const [slugTouched, setSlugTouched] = useState(false);
 
@@ -54,7 +59,11 @@ export const SignupOrgPage: React.FC = () => {
         phoneE164: values.phoneE164 || undefined,
         password: values.password,
       });
-      navigate('/workspace');
+      if (selectedPlan && selectedPlan !== 'FREE') {
+        navigate(`/workspace?tab=billing&plan=${selectedPlan}&cycle=${selectedCycle}&currency=${selectedCurrency}`);
+      } else {
+        navigate('/workspace');
+      }
     } catch (err) {
       setProblem(normalizeProblemDetail(err));
     }
@@ -68,7 +77,9 @@ export const SignupOrgPage: React.FC = () => {
             Provision your Proofly organization
           </h1>
           <p className="mt-1.5 text-sm text-[#526277]">
-            Starts on the Free plan (4 members, 1 geofenced site) with a dedicated tenant database.
+            {selectedPlan !== 'FREE'
+              ? `Provisions on Free (4 members, 1 site), then opens Billing checkout for ${selectedPlan} (${selectedCycle}).`
+              : 'Starts on the Free plan (4 members, 1 geofenced site) with a dedicated tenant database.'}
           </p>
         </div>
 

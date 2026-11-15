@@ -61,16 +61,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAccessToken(session.accessToken);
     setUser(session.user);
     setDeviceId(session.deviceId);
+    try {
+      window.localStorage.setItem('proofly_has_session', '1');
+    } catch {
+      // Ignore storage failure
+    }
   }, []);
 
   const clearSession = useCallback(() => {
     setAccessToken(null);
     setUser(null);
     setDeviceId(null);
+    try {
+      window.localStorage.removeItem('proofly_has_session');
+    } catch {
+      // Ignore storage failure
+    }
   }, []);
 
   useEffect(() => {
     let active = true;
+    const hasHint = (() => {
+      try {
+        return window.localStorage.getItem('proofly_has_session') === '1';
+      } catch {
+        return false;
+      }
+    })();
+    const onProtectedPath =
+      typeof window !== 'undefined' &&
+      (window.location.pathname.startsWith('/workspace') ||
+        window.location.pathname.startsWith('/billing/callback'));
+
+    if (!hasHint && !onProtectedPath) {
+      setIsRestoring(false);
+      return () => {
+        active = false;
+      };
+    }
+
     (async () => {
       try {
         const { data, error } = await apiClient.POST('/api/v1/auth/refresh', {
@@ -78,9 +107,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
         if (active && data && !error) {
           applySession(data);
+        } else if (active && error) {
+          clearSession();
         }
       } catch {
-        // Silent boot check; unauthenticated state is expected on initial visit
+        // Silent boot check; unauthenticated state is expected when backend offline
       } finally {
         if (active) setIsRestoring(false);
       }
@@ -88,7 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       active = false;
     };
-  }, [apiClient, applySession]);
+  }, [apiClient, applySession, clearSession]);
 
   const signupOrg = useCallback(
     async (payload: Omit<SignupOrgRequest, 'clientType' | 'deviceFingerprint' | 'deviceName'>) => {

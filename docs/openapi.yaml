@@ -216,6 +216,86 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/password-reset/request:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Request a password reset email (non-enumerating 202 Accepted)
+      operationId: requestPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '202':
+          description: Reset link enqueued if matching active account exists
+        '429':
+          description: Rate limited
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/password-reset/confirm:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Confirm password reset with single-use token and revoke active sessions
+      operationId: confirmPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '204':
+          description: Password reset and sessions revoked
+        '400':
+          description: Invalid or expired token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/verify-email/confirm:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Verify user email address using single-use verification token
+      operationId: confirmEmailVerification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerifyConfirmRequest'
+      responses:
+        '204':
+          description: Email verified
+        '400':
+          description: Invalid or expired token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/auth/verify-email/resend:
+    post:
+      tags:
+        - Authentication & Devices
+      summary: Re-send email verification link for current authenticated user
+      operationId: resendEmailVerification
+      security:
+        - bearerJwt: []
+      responses:
+        '202':
+          description: Verification email enqueued if not already verified
+        '401':
+          description: Unauthorized
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
   /api/v1/tenants/me:
     get:
       tags:
@@ -237,6 +317,857 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/billing/plans:
+    get:
+      tags:
+        - Billing & Payment Gateways
+      summary: List the 4 active subscription plans with multi-currency gateway pricing
+      operationId: listPlans
+      parameters:
+        - name: currency
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Active plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlanView'
+  /api/v1/billing/subscription:
+    get:
+      tags:
+        - Billing & Payment Gateways
+      summary: Get current tenant subscription and ledger credit balance
+      operationId: currentSubscription
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Current subscription state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionView'
+        '403':
+          description: Forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/billing/checkout:
+    post:
+      tags:
+        - Billing & Payment Gateways
+      summary: Initialize gateway-routed multi-currency subscription checkout (idempotent)
+      operationId: checkoutSubscription
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+      responses:
+        '200':
+          description: Gateway authorization URL, gateway code, and reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '400':
+          description: Missing Idempotency-Key or invalid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/billing/verify:
+    get:
+      tags:
+        - Billing & Payment Gateways
+      summary: Verify payment settlement status against routed gateway for callback page
+      operationId: verifyPayment
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: reference
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Verification status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyPaymentResponse'
+        '404':
+          description: Payment reference not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/billing/payments:
+    get:
+      tags:
+        - Billing & Payment Gateways
+      summary: List tenant payment receipts in original settled currency without FX conversion
+      operationId: listTenantPayments
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          description: Payment receipts in settled currencies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentReceiptView'
+  /api/v1/webhooks/paystack:
+    post:
+      tags:
+        - Billing & Payment Gateways
+      summary: Receive and process HMAC-SHA512 verified Paystack webhook events
+      operationId: paystackWebhook
+      parameters:
+        - name: x-paystack-signature
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Event accepted or already processed idempotently
+        '401':
+          description: Invalid HMAC signature
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/webhooks/stripe:
+    post:
+      tags:
+        - Billing & Payment Gateways
+      summary: Receive and process HMAC-SHA256 verified Stripe webhook events
+      operationId: stripeWebhook
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Event accepted or already processed idempotently
+        '401':
+          description: Invalid or expired Stripe signature
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/notifications/outbox:
+    get:
+      tags:
+        - Notifications
+      summary: List recent notification outbox deliveries for current tenant
+      operationId: listNotificationOutbox
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          description: Outbox items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OutboxView'
+  /api/v1/notifications/outbox/{notificationId}/retry:
+    post:
+      tags:
+        - Notifications
+      summary: Re-queue a failed or dead-letter notification for current tenant
+      operationId: retryNotification
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Re-queued for immediate delivery
+        '404':
+          description: Retryable notification not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+  /api/v1/org/settings:
+    get:
+      tags:
+        - Organization & Staff
+      summary: Get organization attendance and geofence defaults
+      operationId: getOrgSettings
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Organization settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgSettingsView'
+    put:
+      tags:
+        - Organization & Staff
+      summary: Update organization defaults (ADMIN+)
+      operationId: updateOrgSettings
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrgSettingsRequest'
+      responses:
+        '200':
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgSettingsView'
+  /api/v1/org/members:
+    get:
+      tags:
+        - Organization & Staff
+      summary: List visible staff members scoped by caller role
+      operationId: listMembers
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Visible staff members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MemberSummary'
+  /api/v1/org/invites:
+    get:
+      tags:
+        - Organization & Staff
+      summary: List staff invitations (ADMIN+)
+      operationId: listInvitations
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Invitations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InvitationView'
+    post:
+      tags:
+        - Organization & Staff
+      summary: Invite staff by work email or onboard with E.164 Phone + PIN (ADMIN+)
+      operationId: inviteStaff
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteStaffRequest'
+      responses:
+        '201':
+          description: Staff invited or activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberSummary'
+  /api/v1/org/invites/accept:
+    post:
+      tags:
+        - Organization & Staff
+      summary: Accept an email staff invitation and set initial password
+      operationId: acceptInvite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptInviteRequest'
+      responses:
+        '204':
+          description: Invitation accepted
+  /api/v1/org/members/{membershipId}:
+    patch:
+      tags:
+        - Organization & Staff
+      summary: Update member role, manager, or status (ADMIN+ / SUPER_ADMIN)
+      operationId: updateMember
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: membershipId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemberRequest'
+      responses:
+        '200':
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberSummary'
+  /api/v1/sites:
+    get:
+      tags:
+        - Sites & Geofences
+      summary: List visible sites
+      operationId: listSites
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Visible sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SiteView'
+    post:
+      tags:
+        - Sites & Geofences
+      summary: Create a new geofenced work site (ADMIN+)
+      operationId: createSite
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSiteRequest'
+      responses:
+        '201':
+          description: Site created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteView'
+  /api/v1/sites/{siteId}:
+    patch:
+      tags:
+        - Sites & Geofences
+      summary: Update site geofence radius, coordinates, shift rules, or active state (ADMIN+)
+      operationId: updateSite
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSiteRequest'
+      responses:
+        '200':
+          description: Updated site
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteView'
+  /api/v1/sites/assignments/me:
+    get:
+      tags:
+        - Sites & Geofences
+      summary: Get current user's assigned sites with effective per-site shift rules
+      operationId: mySiteAssignments
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Assigned sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SiteAssignmentView'
+  /api/v1/sites/assignments/{membershipId}:
+    put:
+      tags:
+        - Sites & Geofences
+      summary: Set assigned sites and shift overrides for a staff member (ADMIN+)
+      operationId: setMemberAssignments
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: membershipId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAssignmentsRequest'
+      responses:
+        '200':
+          description: Updated assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SiteAssignmentView'
+  /api/v1/attendance/clock-in:
+    post:
+      tags:
+        - Attendance & Corrections
+      summary: Record a geofenced clock-in event
+      operationId: clockIn
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClockRequest'
+      responses:
+        '201':
+          description: Clock-in recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceEventView'
+  /api/v1/attendance/clock-out:
+    post:
+      tags:
+        - Attendance & Corrections
+      summary: Record a geofenced clock-out event paired with open shift
+      operationId: clockOut
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClockRequest'
+      responses:
+        '201':
+          description: Clock-out recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceEventView'
+  /api/v1/attendance/me:
+    get:
+      tags:
+        - Attendance & Corrections
+      summary: List personal clock-in/out history
+      operationId: myAttendance
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 40
+      responses:
+        '200':
+          description: Attendance events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AttendanceEventView'
+  /api/v1/attendance/flagged:
+    get:
+      tags:
+        - Attendance & Corrections
+      summary: List PENDING_REVIEW out-of-fence clock attempts scoped by role (MANAGER+)
+      operationId: listFlaggedAttendance
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Flagged events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AttendanceEventView'
+  /api/v1/attendance/{eventId}/review:
+    post:
+      tags:
+        - Attendance & Corrections
+      summary: Approve or reject a flagged out-of-fence clock attempt (MANAGER+)
+      operationId: reviewFlaggedAttendance
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewDecisionRequest'
+      responses:
+        '200':
+          description: Reviewed event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceEventView'
+  /api/v1/attendance/corrections:
+    get:
+      tags:
+        - Attendance & Corrections
+      summary: List attendance corrections scoped strictly by caller role
+      operationId: listCorrections
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Corrections list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CorrectionView'
+    post:
+      tags:
+        - Attendance & Corrections
+      summary: Submit an attendance timestamp correction request with reason
+      operationId: requestCorrection
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCorrectionRequest'
+      responses:
+        '201':
+          description: Correction requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrectionView'
+  /api/v1/attendance/corrections/{correctionId}/review:
+    post:
+      tags:
+        - Attendance & Corrections
+      summary: Approve or reject an attendance correction (MANAGER+)
+      operationId: reviewCorrection
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: correctionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewDecisionRequest'
+      responses:
+        '200':
+          description: Decided correction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrectionView'
+  /api/v1/leave/requests:
+    get:
+      tags:
+        - Leave Management
+      summary: List leave requests visible to current user
+      operationId: listLeaveRequests
+      security:
+        - bearerJwt: []
+      responses:
+        '200':
+          description: Leave requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeaveRequestView'
+    post:
+      tags:
+        - Leave Management
+      summary: Submit a leave request routed to assigned manager
+      operationId: submitLeaveRequest
+      security:
+        - bearerJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLeaveRequest'
+      responses:
+        '201':
+          description: Leave created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequestView'
+  /api/v1/leave/requests/{leaveId}/review:
+    post:
+      tags:
+        - Leave Management
+      summary: Approve or reject a team member's leave request (MANAGER+)
+      operationId: reviewLeaveRequest
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: leaveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaveDecisionRequest'
+      responses:
+        '200':
+          description: Decided leave request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequestView'
+  /api/v1/leave/requests/{leaveId}/cancel:
+    post:
+      tags:
+        - Leave Management
+      summary: Cancel one's own PENDING leave request
+      operationId: cancelLeaveRequest
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: leaveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Canceled leave request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaveRequestView'
+  /api/v1/reports/live-board:
+    get:
+      tags:
+        - Live Board & Payroll Reports
+      summary: Real-time presence board (MANAGER+)
+      operationId: getLiveBoard
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Live board snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveBoardResponse'
+  /api/v1/reports/payroll-summary:
+    get:
+      tags:
+        - Live Board & Payroll Reports
+      summary: Payroll regular, late, and overtime hours summary (MANAGER+)
+      operationId: getPayrollSummary
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: fromDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Payroll rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PayrollRow'
+  /api/v1/reports/payroll-csv:
+    get:
+      tags:
+        - Live Board & Payroll Reports
+      summary: Download payroll-ready CSV (MANAGER+)
+      operationId: downloadPayrollCsv
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: fromDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: siteId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: CSV payroll export
+          content:
+            text/csv:
+              schema:
+                type: string
+  /api/v1/audit/tenant-logs:
+    get:
+      tags:
+        - Audit Log
+      summary: List tenant SHA-256 hash-chained audit logs (ADMIN+)
+      operationId: listTenantAuditLogs
+      security:
+        - bearerJwt: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Tenant audit log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TenantAuditEntryView'
 components:
   securitySchemes:
     bearerJwt:
@@ -253,6 +1184,9 @@ components:
     Role:
       type: string
       enum: [SUPER_ADMIN, ADMIN, MANAGER, EMPLOYEE]
+    GatewayCode:
+      type: string
+      enum: [PAYSTACK, STRIPE]
     SignupOrgRequest:
       type: object
       required: [orgName, slug, fullName, email, password]
@@ -458,3 +1392,557 @@ components:
           type: object
           additionalProperties:
             type: string
+    PasswordResetRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    PasswordResetConfirmRequest:
+      type: object
+      required: [tenantId, token, newPassword]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        token:
+          type: string
+        newPassword:
+          type: string
+          minLength: 10
+          maxLength: 128
+    EmailVerifyConfirmRequest:
+      type: object
+      required: [tenantId, token]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        token:
+          type: string
+    PlanPriceView:
+      type: object
+      required: [currency, gateway, monthlyPriceMinor, annualPriceMinor]
+      properties:
+        currency:
+          type: string
+        gateway:
+          $ref: '#/components/schemas/GatewayCode'
+        monthlyPriceMinor:
+          type: integer
+          format: int64
+        annualPriceMinor:
+          type: integer
+          format: int64
+    PlanView:
+      type: object
+      required: [id, code, name, maxMembers, maxSites, monthlyPriceMinor, annualPriceMinor, currency, gateway, isActive, prices]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        maxMembers:
+          type: integer
+        maxSites:
+          type: integer
+        monthlyPriceMinor:
+          type: integer
+          format: int64
+        annualPriceMinor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        gateway:
+          $ref: '#/components/schemas/GatewayCode'
+        isActive:
+          type: boolean
+        prices:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanPriceView'
+    CurrencyBalanceView:
+      type: object
+      required: [currency, gateway, creditBalanceMinor]
+      properties:
+        currency:
+          type: string
+        gateway:
+          $ref: '#/components/schemas/GatewayCode'
+        creditBalanceMinor:
+          type: integer
+          format: int64
+    PaymentReceiptView:
+      type: object
+      required: [id, reference, planCode, planName, billingCycle, gateway, amountMinor, currency, status, initiatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        planCode:
+          type: string
+        planName:
+          type: string
+        billingCycle:
+          type: string
+        gateway:
+          $ref: '#/components/schemas/GatewayCode'
+        amountMinor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        status:
+          type: string
+        initiatedAt:
+          type: string
+          format: date-time
+        settledAt:
+          type: string
+          format: date-time
+          nullable: true
+    SubscriptionView:
+      type: object
+      required: [tenantId, planCode, planName, billingCycle, status, creditBalanceMinor, currency, gateway, currencyBalances]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        planCode:
+          type: string
+        planName:
+          type: string
+        billingCycle:
+          type: string
+          enum: [MONTHLY, ANNUAL]
+        status:
+          type: string
+        currentPeriodEnd:
+          type: string
+          format: date-time
+          nullable: true
+        graceUntil:
+          type: string
+          format: date-time
+          nullable: true
+        creditBalanceMinor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        gateway:
+          $ref: '#/components/schemas/GatewayCode'
+        currencyBalances:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrencyBalanceView'
+    CheckoutRequest:
+      type: object
+      required: [planCode, billingCycle, payerEmail]
+      properties:
+        planCode:
+          type: string
+        billingCycle:
+          type: string
+          enum: [MONTHLY, ANNUAL]
+        payerEmail:
+          type: string
+          format: email
+        currency:
+          type: string
+    CheckoutResponse:
+      type: object
+      required: [paymentId, gateway, reference, authorizationUrl, amountMinor, currency]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        gateway:
+          $ref: '#/components/schemas/GatewayCode'
+        reference:
+          type: string
+        authorizationUrl:
+          type: string
+        amountMinor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+    VerifyPaymentResponse:
+      type: object
+      required: [gateway, reference, localStatus, providerStatus, amountMinor, currency]
+      properties:
+        gateway:
+          $ref: '#/components/schemas/GatewayCode'
+        reference:
+          type: string
+        localStatus:
+          type: string
+        providerStatus:
+          type: string
+        amountMinor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+    OutboxView:
+      type: object
+      required: [id, channel, recipient, templateCode, status, attemptCount, maxAttempts, nextAttemptAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [EMAIL, SMS]
+        recipient:
+          type: string
+        templateCode:
+          type: string
+        subject:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, PROCESSING, SENT, FAILED, DEAD_LETTER]
+        attemptCount:
+          type: integer
+        maxAttempts:
+          type: integer
+        nextAttemptAt:
+          type: string
+          format: date-time
+        lastError:
+          type: string
+          nullable: true
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    OrgSettingsView:
+      type: object
+      required: [orgName, defaultTimezone, lateGraceMinutes, overtimeThresholdMinutes, maxGpsAccuracyMeters, locationRetentionDays]
+      properties:
+        orgName: { type: string }
+        defaultTimezone: { type: string }
+        lateGraceMinutes: { type: integer }
+        overtimeThresholdMinutes: { type: integer }
+        maxGpsAccuracyMeters: { type: integer }
+        locationRetentionDays: { type: integer }
+    UpdateOrgSettingsRequest:
+      type: object
+      properties:
+        orgName: { type: string }
+        defaultTimezone: { type: string }
+        lateGraceMinutes: { type: integer }
+        overtimeThresholdMinutes: { type: integer }
+        maxGpsAccuracyMeters: { type: integer }
+    MemberSummary:
+      type: object
+      required: [membershipId, userId, fullName, role, status, assignedSiteIds]
+      properties:
+        membershipId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        fullName: { type: string }
+        email: { type: string, nullable: true }
+        phoneE164: { type: string, nullable: true }
+        role: { $ref: '#/components/schemas/Role' }
+        status: { type: string }
+        managerMembershipId: { type: string, format: uuid, nullable: true }
+        managerName: { type: string, nullable: true }
+        jobTitle: { type: string, nullable: true }
+        employeeCode: { type: string, nullable: true }
+        assignedSiteIds:
+          type: array
+          items: { type: string, format: uuid }
+    InviteStaffRequest:
+      type: object
+      required: [inviteType, fullName, role]
+      properties:
+        inviteType: { type: string, enum: [EMAIL, PHONE_PIN] }
+        fullName: { type: string }
+        email: { type: string, format: email }
+        phoneE164: { type: string }
+        initialPin: { type: string }
+        role: { type: string, enum: [ADMIN, MANAGER, EMPLOYEE] }
+        managerMembershipId: { type: string, format: uuid, nullable: true }
+        jobTitle: { type: string }
+        employeeCode: { type: string }
+    InvitationView:
+      type: object
+      required: [id, inviteType, role, expiresAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        inviteType: { type: string }
+        email: { type: string, nullable: true }
+        phoneE164: { type: string, nullable: true }
+        role: { type: string }
+        managerMembershipId: { type: string, format: uuid, nullable: true }
+        expiresAt: { type: string, format: date-time }
+        acceptedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    AcceptInviteRequest:
+      type: object
+      required: [tenantId, token, password]
+      properties:
+        tenantId: { type: string, format: uuid }
+        token: { type: string }
+        fullName: { type: string }
+        password: { type: string }
+    UpdateMemberRequest:
+      type: object
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, OFFBOARDED] }
+        managerMembershipId: { type: string, format: uuid, nullable: true }
+        jobTitle: { type: string }
+        employeeCode: { type: string }
+    SiteView:
+      type: object
+      required: [id, name, code, latitude, longitude, radiusMeters, timezone, shiftStartLocal, lateGraceMinutes, overtimeThresholdMinutes, isActive, assignedStaffCount]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        code: { type: string }
+        address: { type: string, nullable: true }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        radiusMeters: { type: integer }
+        timezone: { type: string }
+        shiftStartLocal: { type: string }
+        lateGraceMinutes: { type: integer }
+        overtimeThresholdMinutes: { type: integer }
+        isActive: { type: boolean }
+        assignedStaffCount: { type: integer }
+    CreateSiteRequest:
+      type: object
+      required: [name, latitude, longitude]
+      properties:
+        name: { type: string }
+        code: { type: string }
+        address: { type: string }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        radiusMeters: { type: integer }
+        timezone: { type: string }
+        shiftStartLocal: { type: string }
+        lateGraceMinutes: { type: integer }
+        overtimeThresholdMinutes: { type: integer }
+    UpdateSiteRequest:
+      type: object
+      properties:
+        name: { type: string }
+        address: { type: string }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        radiusMeters: { type: integer }
+        timezone: { type: string }
+        shiftStartLocal: { type: string }
+        lateGraceMinutes: { type: integer }
+        overtimeThresholdMinutes: { type: integer }
+        isActive: { type: boolean }
+    SiteAssignmentItem:
+      type: object
+      required: [siteId, isPrimary]
+      properties:
+        siteId: { type: string, format: uuid }
+        isPrimary: { type: boolean }
+        shiftStartOverride: { type: string, nullable: true }
+        lateGraceOverride: { type: integer, nullable: true }
+        overtimeThresholdOverride: { type: integer, nullable: true }
+    SetAssignmentsRequest:
+      type: object
+      required: [assignments]
+      properties:
+        assignments:
+          type: array
+          items: { $ref: '#/components/schemas/SiteAssignmentItem' }
+    SiteAssignmentView:
+      type: object
+      required: [id, membershipId, siteId, siteName, siteCode, timezone, isPrimary, shiftStartLocal, lateGraceMinutes, overtimeThresholdMinutes]
+      properties:
+        id: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        siteName: { type: string }
+        siteCode: { type: string }
+        timezone: { type: string }
+        isPrimary: { type: boolean }
+        shiftStartLocal: { type: string }
+        lateGraceMinutes: { type: integer }
+        overtimeThresholdMinutes: { type: integer }
+    ClockRequest:
+      type: object
+      required: [siteId, latitude, longitude, accuracyMeters]
+      properties:
+        siteId: { type: string, format: uuid }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        accuracyMeters: { type: integer }
+        notes: { type: string }
+    AttendanceEventView:
+      type: object
+      required: [id, membershipId, staffName, siteId, siteName, eventType, occurredAt, effectiveAt, localDate, distanceMeters, accuracyMeters, geofenceStatus, isLate, lateMinutes, workedMinutes, overtimeMinutes]
+      properties:
+        id: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        staffName: { type: string }
+        employeeCode: { type: string, nullable: true }
+        siteId: { type: string, format: uuid }
+        siteName: { type: string }
+        eventType: { type: string, enum: [CLOCK_IN, CLOCK_OUT] }
+        pairedClockInId: { type: string, format: uuid, nullable: true }
+        occurredAt: { type: string, format: date-time }
+        effectiveAt: { type: string, format: date-time }
+        localDate: { type: string, format: date }
+        distanceMeters: { type: integer }
+        accuracyMeters: { type: integer }
+        geofenceStatus: { type: string, enum: [VERIFIED, PENDING_REVIEW, APPROVED, REJECTED] }
+        isLate: { type: boolean }
+        lateMinutes: { type: integer }
+        workedMinutes: { type: integer }
+        overtimeMinutes: { type: integer }
+        notes: { type: string, nullable: true }
+        reviewedByName: { type: string, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        reviewReason: { type: string, nullable: true }
+    ReviewDecisionRequest:
+      type: object
+      required: [decision, reason]
+      properties:
+        decision: { type: string, enum: [APPROVED, REJECTED] }
+        reason: { type: string }
+    CreateCorrectionRequest:
+      type: object
+      required: [attendanceEventId, proposedEffectiveAt, reason]
+      properties:
+        attendanceEventId: { type: string, format: uuid }
+        proposedEffectiveAt: { type: string, format: date-time }
+        reason: { type: string }
+    CorrectionView:
+      type: object
+      required: [id, attendanceEventId, membershipId, staffName, eventType, siteName, status, originalEffectiveAt, proposedEffectiveAt, reason, requestedByName, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        attendanceEventId: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        staffName: { type: string }
+        eventType: { type: string }
+        siteName: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        originalEffectiveAt: { type: string, format: date-time }
+        proposedEffectiveAt: { type: string, format: date-time }
+        reason: { type: string }
+        requestedByName: { type: string }
+        reviewedByName: { type: string, nullable: true }
+        reviewNote: { type: string, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    CreateLeaveRequest:
+      type: object
+      required: [leaveType, startDate, endDate, reason]
+      properties:
+        leaveType: { type: string, enum: [ANNUAL, SICK, UNPAID, OTHER] }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        reason: { type: string }
+    LeaveDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [APPROVED, REJECTED] }
+        note: { type: string }
+    LeaveRequestView:
+      type: object
+      required: [id, membershipId, staffName, leaveType, startDate, endDate, reason, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        staffName: { type: string }
+        managerMembershipId: { type: string, format: uuid, nullable: true }
+        managerName: { type: string, nullable: true }
+        leaveType: { type: string }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        reason: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, CANCELED] }
+        reviewedByName: { type: string, nullable: true }
+        reviewNote: { type: string, nullable: true }
+        reviewedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    LiveBoardSummary:
+      type: object
+      required: [totalVisibleStaff, onSiteCount, lateCount, pendingReviewCount, onLeaveCount, offCount]
+      properties:
+        totalVisibleStaff: { type: integer }
+        onSiteCount: { type: integer }
+        lateCount: { type: integer }
+        pendingReviewCount: { type: integer }
+        onLeaveCount: { type: integer }
+        offCount: { type: integer }
+    LiveStaffRow:
+      type: object
+      required: [membershipId, fullName, role, presenceStatus, isLate, lateMinutes, distanceMeters]
+      properties:
+        membershipId: { type: string, format: uuid }
+        fullName: { type: string }
+        employeeCode: { type: string, nullable: true }
+        role: { type: string }
+        presenceStatus: { type: string }
+        siteId: { type: string, format: uuid, nullable: true }
+        siteName: { type: string, nullable: true }
+        lastEventAt: { type: string, format: date-time, nullable: true }
+        isLate: { type: boolean }
+        lateMinutes: { type: integer }
+        distanceMeters: { type: integer }
+        geofenceStatus: { type: string, nullable: true }
+    LiveBoardResponse:
+      type: object
+      required: [date, summary, rows]
+      properties:
+        date: { type: string, format: date }
+        summary: { $ref: '#/components/schemas/LiveBoardSummary' }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/LiveStaffRow' }
+    PayrollRow:
+      type: object
+      required: [membershipId, fullName, role, siteName, shiftsCompleted, lateArrivals, totalLateMinutes, regularMinutes, overtimeMinutes, totalWorkedMinutes, pendingReviewCount]
+      properties:
+        membershipId: { type: string, format: uuid }
+        fullName: { type: string }
+        employeeCode: { type: string, nullable: true }
+        role: { type: string }
+        siteName: { type: string }
+        shiftsCompleted: { type: integer }
+        lateArrivals: { type: integer }
+        totalLateMinutes: { type: integer }
+        regularMinutes: { type: integer }
+        overtimeMinutes: { type: integer }
+        totalWorkedMinutes: { type: integer }
+        pendingReviewCount: { type: integer }
+    TenantAuditEntryView:
+      type: object
+      required: [id, actorName, action, entityType, entityId, rowHash, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        actorMembershipId: { type: string, format: uuid, nullable: true }
+        actorName: { type: string }
+        action: { type: string }
+        entityType: { type: string }
+        entityId: { type: string }
+        beforeStateJson: { type: string, nullable: true }
+        afterStateJson: { type: string, nullable: true }
+        requestId: { type: string, nullable: true }
+        rowHash: { type: string }
+        createdAt: { type: string, format: date-time }

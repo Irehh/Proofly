@@ -27,7 +27,10 @@ class ArchitectureRulesTest {
     void commonModuleMustNotDependOnFeatureModules() {
         noClasses()
                 .that().resideInAPackage("..common..")
-                .should().dependOnClassesThat().resideInAnyPackage("..tenancy..", "..identity..", "..audit..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "..tenancy..", "..identity..", "..audit..", "..notification..", "..billing..",
+                        "..organization..", "..site..", "..attendance..", "..leave..", "..reporting.."
+                )
                 .check(classes);
     }
 
@@ -35,7 +38,10 @@ class ArchitectureRulesTest {
     void servicesMustBeInFeaturePackages() {
         classes()
                 .that().haveSimpleNameEndingWith("Service")
-                .should().resideInAnyPackage("..tenancy..", "..identity..", "..audit..")
+                .should().resideInAnyPackage(
+                        "..tenancy..", "..identity..", "..audit..", "..notification..", "..billing..",
+                        "..organization..", "..site..", "..attendance..", "..leave..", "..reporting.."
+                )
                 .check(classes);
     }
 }

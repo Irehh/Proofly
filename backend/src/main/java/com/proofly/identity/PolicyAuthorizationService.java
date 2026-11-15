@@ -39,7 +39,15 @@ public class PolicyAuthorizationService {
         return actualRank != null && requiredRank != null && actualRank >= requiredRank;
     }
 
+    public boolean isManagerOrAbove() {
+        return hasAtLeastRole("MANAGER");
+    }
+
     public boolean isAdminOrAbove() {
         return hasAtLeastRole("ADMIN");
+    }
+
+    public boolean isSuperAdmin() {
+        return hasAtLeastRole("SUPER_ADMIN");
     }
 }

@@ -53,6 +53,21 @@ public final class AuthDtos {
             @NotBlank @Pattern(regexp = "^\\d{6}$") String totpCode
     ) {}
 
+    public record PasswordResetRequest(
+            @NotBlank @Email String email
+    ) {}
+
+    public record PasswordResetConfirmRequest(
+            @jakarta.validation.constraints.NotNull UUID tenantId,
+            @NotBlank String token,
+            @NotBlank @Size(min = 10, max = 128) String newPassword
+    ) {}
+
+    public record EmailVerifyConfirmRequest(
+            @jakarta.validation.constraints.NotNull UUID tenantId,
+            @NotBlank String token
+    ) {}
+
     public record AuthUserView(
             UUID userId,
             UUID tenantId,

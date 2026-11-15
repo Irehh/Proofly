@@ -52,6 +52,7 @@ public class AuthService {
     private final AuditWriter auditWriter;
     private final JdbcClient tenantJdbc;
     private final com.proofly.common.PiiCrypto piiCrypto;
+    private final AccountRecoveryService recoveryService;
 
     public AuthService(TenantProvisioningService provisioningService,
                        TenantDirectoryService directoryService,
@@ -64,7 +65,8 @@ public class AuthService {
                        SecurityProperties props,
                        AuditWriter auditWriter,
                        DataSource tenantRoutingDataSource,
-                       com.proofly.common.PiiCrypto piiCrypto) {
+                       com.proofly.common.PiiCrypto piiCrypto,
+                       AccountRecoveryService recoveryService) {
         this.provisioningService = provisioningService;
         this.directoryService = directoryService;
         this.passwordService = passwordService;
@@ -77,6 +79,7 @@ public class AuthService {
         this.auditWriter = auditWriter;
         this.tenantJdbc = JdbcClient.create(tenantRoutingDataSource);
         this.piiCrypto = piiCrypto;
+        this.recoveryService = recoveryService;
     }
 
     public IssuedSession signupOrganization(AuthDtos.SignupOrgRequest req, String ipAddress) {
@@ -105,6 +108,14 @@ public class AuthService {
                 null,
                 Map.of("slug", provisioned.slug(), "schemaVersion", provisioned.schemaVersion()),
                 ipAddress
+        );
+
+        recoveryService.enqueueEmailVerification(
+                provisioned.tenantId(),
+                provisioned.ownerUserId(),
+                req.email().trim().toLowerCase(),
+                req.fullName().trim(),
+                req.orgName().trim()
         );
 
         return TenantContext.runWithTenant(new TenantId(provisioned.tenantId()), () -> {

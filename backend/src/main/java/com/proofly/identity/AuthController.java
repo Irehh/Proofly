@@ -38,18 +38,61 @@ public class AuthController {
     private final DeviceService deviceService;
     private final MfaService mfaService;
     private final JwtKeyService jwtKeyService;
+    private final AccountRecoveryService recoveryService;
     private final SecurityProperties props;
 
     public AuthController(AuthService authService,
                           DeviceService deviceService,
                           MfaService mfaService,
                           JwtKeyService jwtKeyService,
+                          AccountRecoveryService recoveryService,
                           SecurityProperties props) {
         this.authService = authService;
         this.deviceService = deviceService;
         this.mfaService = mfaService;
         this.jwtKeyService = jwtKeyService;
+        this.recoveryService = recoveryService;
         this.props = props;
+    }
+
+    @PostMapping("/api/v1/auth/password-reset/request")
+    @Operation(summary = "Request a password reset email (non-enumerating 202 Accepted)")
+    public ResponseEntity<Void> requestPasswordReset(
+            @Valid @RequestBody AuthDtos.PasswordResetRequest req,
+            HttpServletRequest httpReq
+    ) {
+        recoveryService.requestPasswordReset(req.email(), extractClientIp(httpReq));
+        return ResponseEntity.accepted().build();
+    }
+
+    @PostMapping("/api/v1/auth/password-reset/confirm")
+    @Operation(summary = "Confirm password reset with single-use token and revoke active sessions")
+    public ResponseEntity<Void> confirmPasswordReset(
+            @Valid @RequestBody AuthDtos.PasswordResetConfirmRequest req,
+            HttpServletRequest httpReq
+    ) {
+        recoveryService.confirmPasswordReset(req.tenantId(), req.token(), req.newPassword(), extractClientIp(httpReq));
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/v1/auth/verify-email/confirm")
+    @Operation(summary = "Verify user email address using single-use verification token")
+    public ResponseEntity<Void> confirmEmailVerification(
+            @Valid @RequestBody AuthDtos.EmailVerifyConfirmRequest req,
+            HttpServletRequest httpReq
+    ) {
+        recoveryService.confirmEmailVerification(req.tenantId(), req.token(), extractClientIp(httpReq));
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/v1/auth/verify-email/resend")
+    @PreAuthorize("@policyAuth.isAuthenticated()")
+    @Operation(summary = "Re-send email verification link for current authenticated user")
+    public ResponseEntity<Void> resendEmailVerification(@AuthenticationPrincipal Jwt jwt) {
+        UUID tenantId = UUID.fromString(jwt.getClaimAsString("tid"));
+        UUID userId = UUID.fromString(jwt.getSubject());
+        recoveryService.resendEmailVerification(tenantId, userId);
+        return ResponseEntity.accepted().build();
     }
 
     @PostMapping("/api/v1/auth/signup-org")

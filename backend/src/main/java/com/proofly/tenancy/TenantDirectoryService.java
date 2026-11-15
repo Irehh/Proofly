@@ -73,6 +73,35 @@ public class TenantDirectoryService implements TenantSummary.DirectoryLookup {
                 .optional();
     }
 
+    public TenantSummary.PlanQuota findTenantQuota(UUID tenantId) {
+        return controlJdbc.sql("""
+                SELECT p.code, p.name, p.max_members, p.max_sites
+                FROM tenants t
+                JOIN plans p ON p.id = t.current_plan_id
+                WHERE t.id = :id
+                """)
+                .param("id", tenantId)
+                .query((rs, rowNum) -> new TenantSummary.PlanQuota(
+                        rs.getString("code"),
+                        rs.getString("name"),
+                        rs.getInt("max_members"),
+                        rs.getInt("max_sites")
+                ))
+                .single();
+    }
+
+    public void updateUserStatus(UUID tenantId, UUID tenantUserId, String status) {
+        controlJdbc.sql("""
+                UPDATE global_user_directory
+                SET status = :status
+                WHERE tenant_id = :tenantId AND tenant_user_id = :tenantUserId
+                """)
+                .param("status", status)
+                .param("tenantId", tenantId)
+                .param("tenantUserId", tenantUserId)
+                .update();
+    }
+
     public boolean slugExists(String slug) {
         Integer count = controlJdbc.sql("SELECT COUNT(1) FROM tenants WHERE slug = :slug")
                 .param("slug", slug)

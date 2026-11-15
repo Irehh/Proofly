@@ -8,6 +8,8 @@ import java.util.List;
 public record SecurityProperties(
         JwtProps jwt,
         PinProps pin,
+        long resetTokenTtlMinutes,
+        long verifyTokenTtlHours,
         String piiKeyBase64,
         List<String> corsAllowedOrigins
 ) {

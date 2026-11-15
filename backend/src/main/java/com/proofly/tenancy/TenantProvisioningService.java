@@ -34,7 +34,6 @@ public class TenantProvisioningService {
 
     private static final Logger log = LoggerFactory.getLogger(TenantProvisioningService.class);
     private static final Pattern SAFE_DB_IDENT = Pattern.compile("^[a-z0-9_]{3,63}$");
-    private static final UUID FREE_PLAN_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
     public record ProvisionRequest(
             String orgName,
@@ -89,6 +88,11 @@ public class TenantProvisioningService {
                     "An account with this phone number already exists");
         }
 
+        UUID defaultPlanId = controlJdbc.sql("SELECT id FROM plans WHERE code = :code")
+                .param("code", props.defaultPlanCode())
+                .query(UUID.class)
+                .single();
+
         UUID tenantId = UUID.randomUUID();
         String dbName = buildSafeDbName(tenantId);
 
@@ -105,7 +109,7 @@ public class TenantProvisioningService {
                 .param("port", props.defaultDbPort())
                 .param("dbName", dbName)
                 .param("secretRef", "env:PROOFLY_TENANT_DB_PASSWORD")
-                .param("planId", FREE_PLAN_ID)
+                .param("planId", defaultPlanId)
                 .update();
 
         return executeProvisioningSteps(tenantId, req);
@@ -227,16 +231,22 @@ public class TenantProvisioningService {
         }
     }
 
-    @Scheduled(fixedDelayString = "PT60S")
+    @Scheduled(fixedDelayString = "${proofly.tenancy.provisioning-retry-interval:PT60S}")
     @SchedulerLock(name = "retryStuckProvisioningTenants", lockAtLeastFor = "PT15S", lockAtMostFor = "PT4M")
     public void retryStuckProvisioningTenants() {
+        int maxRetries = Math.max(1, props.provisioningMaxRetries());
+        int delaySec = Math.max(10, props.provisioningRetryDelaySeconds());
+
         List<UUID> stuckIds = controlJdbc.sql("""
                 SELECT id FROM tenants
                 WHERE status = 'PROVISIONING'
-                  AND retry_count < 5
-                  AND updated_at < NOW() - INTERVAL '30 seconds'
+                  AND retry_count < :maxRetries
+                  AND updated_at < NOW() - (:delaySec * INTERVAL '1 second')
+                ORDER BY updated_at ASC
                 LIMIT 10
                 """)
+                .param("maxRetries", maxRetries)
+                .param("delaySec", delaySec)
                 .query(UUID.class)
                 .list();
 
@@ -247,6 +257,19 @@ public class TenantProvisioningService {
             } catch (Exception ex) {
                 log.warn("Retry provisioning failed for tenantId={}: {}", tenantId, ex.getMessage());
             }
+        }
+
+        Integer exhaustedCount = controlJdbc.sql("""
+                SELECT COUNT(1) FROM tenants
+                WHERE status = 'PROVISIONING' AND retry_count >= :maxRetries
+                """)
+                .param("maxRetries", maxRetries)
+                .query(Integer.class)
+                .single();
+
+        if (exhaustedCount != null && exhaustedCount > 0) {
+            log.error("ALERT: {} tenant(s) in PROVISIONING exceeded maxRetries={} and require manual intervention",
+                    exhaustedCount, maxRetries);
         }
     }
 

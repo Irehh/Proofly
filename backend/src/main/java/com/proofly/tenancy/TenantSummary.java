@@ -25,6 +25,8 @@ public record TenantSummary(
 
     public record DirectoryMatch(UUID tenantId, UUID tenantUserId, String status) {}
 
+    public record PlanQuota(String planCode, String planName, int maxMembers, int maxSites) {}
+
     public interface DirectoryLookup {
         Optional<DirectoryMatch> findByEmail(String email);
         Optional<DirectoryMatch> findByPhone(String phoneE164);

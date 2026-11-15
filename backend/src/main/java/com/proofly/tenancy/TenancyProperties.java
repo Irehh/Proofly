@@ -15,5 +15,9 @@ public record TenancyProperties(
         int globalConnectionCap,
         int migrationConcurrency,
         int migrationFailureThreshold,
-        String expectedTenantSchemaVersion
+        String expectedTenantSchemaVersion,
+        String defaultPlanCode,
+        int provisioningMaxRetries,
+        int provisioningRetryDelaySeconds,
+        boolean driftCheckEnabled
 ) {}

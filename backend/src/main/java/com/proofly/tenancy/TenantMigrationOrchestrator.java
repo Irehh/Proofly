@@ -1,11 +1,13 @@
 package com.proofly.tenancy;
 
 import com.zaxxer.hikari.HikariDataSource;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.flywaydb.core.Flyway;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
@@ -41,6 +43,34 @@ public class TenantMigrationOrchestrator {
         this.registry = registry;
     }
 
+    @Scheduled(fixedDelayString = "${proofly.tenancy.drift-check-interval:PT30M}")
+    @SchedulerLock(name = "checkTenantSchemaDrift", lockAtLeastFor = "PT30S", lockAtMostFor = "PT10M")
+    public void checkTenantSchemaDrift() {
+        if (!props.driftCheckEnabled()) {
+            return;
+        }
+        List<TenantSummary> drifted = controlJdbc.sql("""
+                SELECT id, slug, name, status, db_host, db_port, db_name, schema_version,
+                       current_plan_id, default_currency, created_at
+                FROM tenants
+                WHERE status = 'ACTIVE' AND schema_version <> :expected
+                ORDER BY updated_at ASC
+                LIMIT 50
+                """)
+                .param("expected", props.expectedTenantSchemaVersion())
+                .query(TenantSummary.class)
+                .list();
+
+        if (drifted.isEmpty()) {
+            return;
+        }
+        log.warn("Detected {} ACTIVE tenant(s) behind expected schema_version={}; running bounded migration",
+                drifted.size(), props.expectedTenantSchemaVersion());
+        BatchReport report = migrateTenants(drifted);
+        log.info("Tenant schema drift check finished: attempted={} succeeded={} failed={} haltedEarly={}",
+                report.totalAttempted(), report.succeeded(), report.failed(), report.haltedEarly());
+    }
+
     public BatchReport migrateAllActiveTenants() {
         List<TenantSummary> activeTenants = controlJdbc.sql("""
                 SELECT id, slug, name, status, db_host, db_port, db_name, schema_version,
@@ -51,7 +81,10 @@ public class TenantMigrationOrchestrator {
                 """)
                 .query(TenantSummary.class)
                 .list();
+        return migrateTenants(activeTenants);
+    }
 
+    private BatchReport migrateTenants(List<TenantSummary> tenants) {
         AtomicInteger succeeded = new AtomicInteger(0);
         AtomicInteger failed = new AtomicInteger(0);
         AtomicBoolean halted = new AtomicBoolean(false);
@@ -59,7 +92,7 @@ public class TenantMigrationOrchestrator {
         int concurrency = Math.max(1, props.migrationConcurrency());
         try (ExecutorService pool = Executors.newFixedThreadPool(concurrency)) {
             List<Callable<Void>> tasks = new ArrayList<>();
-            for (TenantSummary tenant : activeTenants) {
+            for (TenantSummary tenant : tenants) {
                 tasks.add(() -> {
                     if (halted.get()) {
                         return null;
